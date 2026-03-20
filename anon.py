@@ -5,6 +5,7 @@ from contextlib import suppress
 from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import Conflict
 from telegram.ext import (
     ApplicationHandlerStop,
     Application,
@@ -249,6 +250,16 @@ def get_media_type(message) -> str | None:
 
 def is_admin(update: Update, admin_user_id: int) -> bool:
     return bool(update.effective_user and update.effective_user.id == admin_user_id)
+
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if isinstance(context.error, Conflict):
+        logger.warning(
+            "Telegram getUpdates conflict detected. "
+            "Another instance is polling with the same bot token."
+        )
+        return
+    logger.exception("Unhandled error while processing update: %s", context.error)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -501,6 +512,7 @@ def main() -> None:
     application = Application.builder().token(token).build()
     application.bot_data["db_path"] = DB_PATH
     application.bot_data["admin_user_id"] = admin_user_id
+    application.add_error_handler(on_error)
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("admin", admin))
