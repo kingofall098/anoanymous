@@ -1,6 +1,7 @@
 import logging
 import os
 import sqlite3
+from contextlib import suppress
 from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 DB_PATH = "bot_data.db"
+LOCK_PATH = "bot.lock"
 ADMIN_MENU_PREFIX = "admin:"
 USER_PAGE_SIZE = 10
 
@@ -77,6 +79,24 @@ def init_db(db_path: str) -> None:
             "CREATE INDEX IF NOT EXISTS idx_media_user ON media_messages(user_id)"
         )
         conn.commit()
+
+
+def acquire_lock(lock_path: str) -> int:
+    try:
+        # Atomic create; fails if already exists.
+        return os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            "Another bot instance appears to be running (lock file exists). "
+            "Stop the old instance or delete bot.lock if it is stale."
+        ) from exc
+
+
+def release_lock(lock_fd: int, lock_path: str) -> None:
+    with suppress(OSError):
+        os.close(lock_fd)
+    with suppress(OSError):
+        os.remove(lock_path)
 
 
 def upsert_user(db_path: str, tg_user) -> None:
@@ -425,6 +445,7 @@ def main() -> None:
         )
     admin_user_id = int(admin_user_id_raw)
     init_db(DB_PATH)
+    lock_fd = acquire_lock(LOCK_PATH)
 
     application = Application.builder().token(token).build()
     application.bot_data["db_path"] = DB_PATH
@@ -440,8 +461,29 @@ def main() -> None:
         MessageHandler(filters.ALL & ~filters.COMMAND, anonymous_forward)
     )
 
+    webhook_url = os.getenv("WEBHOOK_URL")
+    webhook_listen = os.getenv("WEBHOOK_LISTEN", "0.0.0.0")
+    webhook_port = int(os.getenv("PORT", "8080"))
+    webhook_path = os.getenv("WEBHOOK_PATH", "/telegram")
+
     logger.info("Bot is running...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    try:
+        if webhook_url:
+            application.run_webhook(
+                listen=webhook_listen,
+                port=webhook_port,
+                url_path=webhook_path,
+                webhook_url=f"{webhook_url.rstrip('/')}{webhook_path}",
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+            )
+        else:
+            application.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+            )
+    finally:
+        release_lock(lock_fd, LOCK_PATH)
 
 
 if __name__ == "__main__":
