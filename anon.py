@@ -2,7 +2,6 @@ import logging
 import os
 import sqlite3
 import time
-from contextlib import suppress
 from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -27,7 +26,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 DB_PATH = "bot_data.db"
-LOCK_PATH = "bot.lock"
 ADMIN_MENU_PREFIX = "admin:"
 USER_PAGE_SIZE = 10
 
@@ -82,24 +80,6 @@ def init_db(db_path: str) -> None:
             "CREATE INDEX IF NOT EXISTS idx_media_user ON media_messages(user_id)"
         )
         conn.commit()
-
-
-def acquire_lock(lock_path: str) -> int:
-    try:
-        # Atomic create; fails if already exists.
-        return os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
-    except FileExistsError as exc:
-        raise RuntimeError(
-            "Another bot instance appears to be running (lock file exists). "
-            "Stop the old instance or delete bot.lock if it is stale."
-        ) from exc
-
-
-def release_lock(lock_fd: int, lock_path: str) -> None:
-    with suppress(OSError):
-        os.close(lock_fd)
-    with suppress(OSError):
-        os.remove(lock_path)
 
 
 def upsert_user(db_path: str, tg_user) -> None:
@@ -509,7 +489,6 @@ def main() -> None:
         )
     admin_user_id = int(admin_user_id_raw)
     init_db(DB_PATH)
-    lock_fd = acquire_lock(LOCK_PATH)
 
     application = Application.builder().token(token).build()
     application.bot_data["db_path"] = DB_PATH
@@ -538,20 +517,17 @@ def main() -> None:
         )
 
     logger.info("Bot is running...")
-    try:
-        if startup_delay > 0:
-            logger.info("Startup delay enabled: waiting %s seconds before connecting to Telegram.", startup_delay)
-            time.sleep(startup_delay)
-        application.run_webhook(
-            listen=webhook_listen,
-            port=webhook_port,
-            url_path=webhook_path,
-            webhook_url=f"{webhook_url.rstrip('/')}{webhook_path}",
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-        )
-    finally:
-        release_lock(lock_fd, LOCK_PATH)
+    if startup_delay > 0:
+        logger.info("Startup delay enabled: waiting %s seconds before connecting to Telegram.", startup_delay)
+        time.sleep(startup_delay)
+    application.run_webhook(
+        listen=webhook_listen,
+        port=webhook_port,
+        url_path=webhook_path,
+        webhook_url=f"{webhook_url.rstrip('/')}{webhook_path}",
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+    )
 
 
 if __name__ == "__main__":
