@@ -422,12 +422,63 @@ async def anonymous_forward(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             media_type=media_type,
         )
 
-    # copy_message sends the message back without showing "forwarded from"
-    await context.bot.copy_message(
-        chat_id=chat_id,
-        from_chat_id=chat_id,
-        message_id=update.message.message_id,
-    )
+    # copy_message keeps it anonymous. If Telegram rejects copy for a media type,
+    # fall back to sending the same media by file_id.
+    try:
+        await update.message.copy(chat_id=chat_id)
+        return
+    except Exception as exc:
+        logger.warning("Anonymous copy failed for message_id=%s: %s", update.message.message_id, exc)
+
+    msg = update.message
+    if msg.text:
+        await context.bot.send_message(chat_id=chat_id, text=msg.text)
+    elif msg.photo:
+        await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=msg.photo[-1].file_id,
+            caption=msg.caption,
+            caption_entities=msg.caption_entities,
+        )
+    elif msg.video:
+        await context.bot.send_video(
+            chat_id=chat_id,
+            video=msg.video.file_id,
+            caption=msg.caption,
+            caption_entities=msg.caption_entities,
+        )
+    elif msg.document:
+        await context.bot.send_document(
+            chat_id=chat_id,
+            document=msg.document.file_id,
+            caption=msg.caption,
+            caption_entities=msg.caption_entities,
+        )
+    elif msg.voice:
+        await context.bot.send_voice(chat_id=chat_id, voice=msg.voice.file_id, caption=msg.caption)
+    elif msg.audio:
+        await context.bot.send_audio(
+            chat_id=chat_id,
+            audio=msg.audio.file_id,
+            caption=msg.caption,
+            caption_entities=msg.caption_entities,
+        )
+    elif msg.sticker:
+        await context.bot.send_sticker(chat_id=chat_id, sticker=msg.sticker.file_id)
+    elif msg.animation:
+        await context.bot.send_animation(
+            chat_id=chat_id,
+            animation=msg.animation.file_id,
+            caption=msg.caption,
+            caption_entities=msg.caption_entities,
+        )
+    elif msg.video_note:
+        await context.bot.send_video_note(chat_id=chat_id, video_note=msg.video_note.file_id)
+    else:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚠️ I received your message, but this media type is not supported for anonymous echo yet.",
+        )
 
 
 def main() -> None:
