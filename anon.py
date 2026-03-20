@@ -1,6 +1,7 @@
 import logging
 import os
 import sqlite3
+import time
 from contextlib import suppress
 from datetime import datetime, timezone
 
@@ -22,6 +23,7 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 DB_PATH = "bot_data.db"
@@ -528,9 +530,13 @@ def main() -> None:
     webhook_listen = os.getenv("WEBHOOK_LISTEN", "0.0.0.0")
     webhook_port = int(os.getenv("PORT", "8080"))
     webhook_path = os.getenv("WEBHOOK_PATH", "/telegram")
+    startup_delay = int(os.getenv("STARTUP_DELAY_SECONDS", "0"))
 
     logger.info("Bot is running...")
     try:
+        if startup_delay > 0:
+            logger.info("Startup delay enabled: waiting %s seconds before connecting to Telegram.", startup_delay)
+            time.sleep(startup_delay)
         if webhook_url:
             application.run_webhook(
                 listen=webhook_listen,
