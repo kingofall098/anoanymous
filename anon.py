@@ -238,6 +238,56 @@ def is_admin(update: Update, admin_user_id: int) -> bool:
     return bool(update.effective_user and update.effective_user.id == admin_user_id)
 
 
+async def flush_media_group(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, media_group_id: str
+) -> None:
+    key = (chat_id, media_group_id)
+    pending_groups = context.application.bot_data.setdefault("pending_media_groups", {})
+    group_data = pending_groups.pop(key, None)
+    if not group_data:
+        return
+
+    message_ids = sorted(group_data["message_ids"])
+    try:
+        # copy_messages keeps album behavior and anonymity.
+        await context.bot.copy_messages(
+            chat_id=chat_id,
+            from_chat_id=chat_id,
+            message_ids=message_ids,
+        )
+        return
+    except Exception as exc:
+        logger.warning(
+            "Album copy failed for chat_id=%s media_group_id=%s: %s",
+            chat_id,
+            media_group_id,
+            exc,
+        )
+
+    # Fallback: copy one by one if grouped copy fails.
+    for message_id in message_ids:
+        try:
+            await context.bot.copy_message(
+                chat_id=chat_id,
+                from_chat_id=chat_id,
+                message_id=message_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Fallback copy failed for chat_id=%s message_id=%s: %s",
+                chat_id,
+                message_id,
+                exc,
+            )
+
+
+async def schedule_media_group_flush(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, media_group_id: str
+) -> None:
+    await asyncio.sleep(1.0)
+    await flush_media_group(context, chat_id, media_group_id)
+
+
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     if isinstance(context.error, Conflict):
         logger.warning(
@@ -418,6 +468,18 @@ async def anonymous_forward(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             message_id=update.message.message_id,
             media_type=media_type,
         )
+
+    media_group_id = update.message.media_group_id
+    if media_group_id:
+        pending_groups = context.application.bot_data.setdefault("pending_media_groups", {})
+        key = (chat_id, str(media_group_id))
+        if key not in pending_groups:
+            task = asyncio.create_task(
+                schedule_media_group_flush(context, chat_id, str(media_group_id))
+            )
+            pending_groups[key] = {"message_ids": [], "task": task}
+        pending_groups[key]["message_ids"].append(update.message.message_id)
+        return
 
     # copy_message keeps it anonymous. If Telegram rejects copy for a media type,
     # fall back to sending the same media by file_id.
