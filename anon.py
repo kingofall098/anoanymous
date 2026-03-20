@@ -505,26 +505,13 @@ def main() -> None:
         MessageHandler(filters.ALL & ~filters.COMMAND, anonymous_forward)
     )
 
-    webhook_url = os.getenv("WEBHOOK_URL")
-    webhook_listen = os.getenv("WEBHOOK_LISTEN", "0.0.0.0")
-    webhook_port = int(os.getenv("PORT", "8080"))
-    webhook_path = os.getenv("WEBHOOK_PATH", "/telegram")
     startup_delay = int(os.getenv("STARTUP_DELAY_SECONDS", "0"))
-
-    if not webhook_url:
-        raise RuntimeError(
-            "WEBHOOK_URL is required. Polling mode is disabled for this bot deployment."
-        )
 
     logger.info("Bot is running...")
     if startup_delay > 0:
         logger.info("Startup delay enabled: waiting %s seconds before connecting to Telegram.", startup_delay)
         time.sleep(startup_delay)
-    application.run_webhook(
-        listen=webhook_listen,
-        port=webhook_port,
-        url_path=webhook_path,
-        webhook_url=f"{webhook_url.rstrip('/')}{webhook_path}",
+    application.run_polling(
         allowed_updates=Update.ALL_TYPES,
         drop_pending_updates=True,
     )
