@@ -2,12 +2,12 @@ import logging
 import os
 import sqlite3
 import time
+import asyncio
 from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import Conflict
 from telegram.ext import (
-    ApplicationHandlerStop,
     Application,
     CallbackQueryHandler,
     CommandHandler,
@@ -78,6 +78,9 @@ def init_db(db_path: str) -> None:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_media_user ON media_messages(user_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users(last_seen_at)"
         )
         conn.commit()
 
@@ -197,10 +200,11 @@ def users_keyboard(db_path: str, page: int) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
 
     for user_id, username, first_name, last_name in users:
+        name = display_name(username, first_name, last_name)
         rows.append(
             [
                 InlineKeyboardButton(
-                    display_name(username, first_name, last_name),
+                    f"{name} ({user_id})",
                     callback_data=f"{ADMIN_MENU_PREFIX}user:{user_id}",
                 )
             ]
@@ -358,7 +362,7 @@ async def admin_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         exc,
                     )
                     await query.message.reply_text(
-                        f"⚠️ Could not load one {media_type} item sent at {created_at}."
+                        f"⚠️ Failed: {media_type} ({message_id}) at {created_at}"
                     )
         await query.message.reply_text("🛠️ Admin Panel", reply_markup=admin_menu_keyboard())
         return
@@ -387,6 +391,7 @@ async def handle_broadcast_input(update: Update, context: ContextTypes.DEFAULT_T
                 message_id=update.message.message_id,
             )
             success += 1
+            await asyncio.sleep(0.05)
         except Exception as exc:
             logger.warning("Broadcast failed to user_id=%s: %s", user_id, exc)
             failed += 1
@@ -395,7 +400,6 @@ async def handle_broadcast_input(update: Update, context: ContextTypes.DEFAULT_T
         f"✅ Broadcast finished.\nDelivered: {success}\nFailed: {failed}",
         reply_markup=admin_menu_keyboard(),
     )
-    raise ApplicationHandlerStop
 
 
 async def anonymous_forward(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -474,6 +478,16 @@ async def anonymous_forward(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 
+async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if (
+        context.user_data.get("awaiting_broadcast")
+        and is_admin(update, context.bot_data["admin_user_id"])
+    ):
+        await handle_broadcast_input(update, context)
+        return
+    await anonymous_forward(update, context)
+
+
 def main() -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     admin_user_id_raw = os.getenv("ADMIN_USER_ID")
@@ -500,10 +514,7 @@ def main() -> None:
     application.add_handler(
         CallbackQueryHandler(admin_callbacks, pattern=f"^{ADMIN_MENU_PREFIX}")
     )
-    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_broadcast_input))
-    application.add_handler(
-        MessageHandler(filters.ALL & ~filters.COMMAND, anonymous_forward)
-    )
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, main_message_handler))
 
     startup_delay = int(os.getenv("STARTUP_DELAY_SECONDS", "0"))
 
