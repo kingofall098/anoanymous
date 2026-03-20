@@ -27,11 +27,11 @@ ADMIN_MENU_PREFIX = "admin:"
 USER_PAGE_SIZE = 10
 
 WELCOME_TEXT = (
-    "Welcome to Anonymous Forward Bot.\n\n"
+    "👋 Welcome to Anonymous Forward Bot.\n\n"
     "Send me any message, photo, video, document, voice, or sticker and "
     "I will forward it back to you anonymously."
 )
-ADMIN_TEXT = "Admin Panel"
+ADMIN_TEXT = "🛠️ Admin Panel"
 MEDIA_TYPES = {
     "photo",
     "video",
@@ -177,12 +177,12 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("Broadcast", callback_data=f"{ADMIN_MENU_PREFIX}broadcast"),
-                InlineKeyboardButton("Total Users", callback_data=f"{ADMIN_MENU_PREFIX}total_users"),
+                InlineKeyboardButton("📢 Broadcast", callback_data=f"{ADMIN_MENU_PREFIX}broadcast"),
+                InlineKeyboardButton("👥 Total Users", callback_data=f"{ADMIN_MENU_PREFIX}total_users"),
             ],
             [
-                InlineKeyboardButton("Total Media", callback_data=f"{ADMIN_MENU_PREFIX}total_media"),
-                InlineKeyboardButton("Users", callback_data=f"{ADMIN_MENU_PREFIX}users:0"),
+                InlineKeyboardButton("🖼️ Total Media", callback_data=f"{ADMIN_MENU_PREFIX}total_media"),
+                InlineKeyboardButton("📋 Users", callback_data=f"{ADMIN_MENU_PREFIX}users:0"),
             ],
         ]
     )
@@ -206,15 +206,15 @@ def users_keyboard(db_path: str, page: int) -> InlineKeyboardMarkup:
     nav_row: list[InlineKeyboardButton] = []
     if page > 0:
         nav_row.append(
-            InlineKeyboardButton("Prev", callback_data=f"{ADMIN_MENU_PREFIX}users:{page - 1}")
+            InlineKeyboardButton("⬅️ Prev", callback_data=f"{ADMIN_MENU_PREFIX}users:{page - 1}")
         )
     if (page + 1) * USER_PAGE_SIZE < total_users:
         nav_row.append(
-            InlineKeyboardButton("Next", callback_data=f"{ADMIN_MENU_PREFIX}users:{page + 1}")
+            InlineKeyboardButton("Next ➡️", callback_data=f"{ADMIN_MENU_PREFIX}users:{page + 1}")
         )
     if nav_row:
         rows.append(nav_row)
-    rows.append([InlineKeyboardButton("Back", callback_data=f"{ADMIN_MENU_PREFIX}back")])
+    rows.append([InlineKeyboardButton("⬅️ Back", callback_data=f"{ADMIN_MENU_PREFIX}back")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -234,6 +234,21 @@ def is_admin(update: Update, admin_user_id: int) -> bool:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message:
         upsert_user(context.bot_data["db_path"], update.effective_user)
+        if is_admin(update, context.bot_data["admin_user_id"]):
+            await update.message.reply_text(
+                "👋 Welcome Admin.\nClick the button below to open admin controls.",
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                "🛠️ Admin Panel",
+                                callback_data=f"{ADMIN_MENU_PREFIX}open_panel",
+                            )
+                        ]
+                    ]
+                ),
+            )
+            return
         await update.message.reply_text(WELCOME_TEXT)
 
 
@@ -241,7 +256,7 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     admin_user_id = context.bot_data["admin_user_id"]
     if not is_admin(update, admin_user_id):
         if update.message:
-            await update.message.reply_text("You are not allowed to access admin panel.")
+            await update.message.reply_text("❌ You are not allowed to access admin panel.")
         return
     if update.message:
         await update.message.reply_text(ADMIN_TEXT, reply_markup=admin_menu_keyboard())
@@ -260,17 +275,20 @@ async def admin_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     data = query.data or ""
     db_path = context.bot_data["db_path"]
 
-    if data == f"{ADMIN_MENU_PREFIX}back":
+    if data in {
+        f"{ADMIN_MENU_PREFIX}back",
+        f"{ADMIN_MENU_PREFIX}open_panel",
+    }:
         await query.edit_message_text(ADMIN_TEXT, reply_markup=admin_menu_keyboard())
         return
 
     if data == f"{ADMIN_MENU_PREFIX}broadcast":
         context.user_data["awaiting_broadcast"] = True
         await query.edit_message_text(
-            "Send the message you want to broadcast to all users.\n"
+            "📢 Send the message you want to broadcast to all users.\n"
             "You can send text or media with caption.",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Back", callback_data=f"{ADMIN_MENU_PREFIX}back")]]
+                [[InlineKeyboardButton("⬅️ Back", callback_data=f"{ADMIN_MENU_PREFIX}back")]]
             ),
         )
         return
@@ -278,9 +296,9 @@ async def admin_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if data == f"{ADMIN_MENU_PREFIX}total_users":
         total = get_total_users(db_path)
         await query.edit_message_text(
-            f"Total users: {total}",
+            f"👥 Total users: {total}",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Back", callback_data=f"{ADMIN_MENU_PREFIX}back")]]
+                [[InlineKeyboardButton("⬅️ Back", callback_data=f"{ADMIN_MENU_PREFIX}back")]]
             ),
         )
         return
@@ -288,9 +306,9 @@ async def admin_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if data == f"{ADMIN_MENU_PREFIX}total_media":
         total = get_total_media(db_path)
         await query.edit_message_text(
-            f"Total media sent: {total}",
+            f"🖼️ Total media sent: {total}",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Back", callback_data=f"{ADMIN_MENU_PREFIX}back")]]
+                [[InlineKeyboardButton("⬅️ Back", callback_data=f"{ADMIN_MENU_PREFIX}back")]]
             ),
         )
         return
@@ -298,7 +316,7 @@ async def admin_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if data.startswith(f"{ADMIN_MENU_PREFIX}users:"):
         page = int(data.split(":")[-1])
         await query.edit_message_text(
-            "Users list:",
+            "📋 Users list:",
             reply_markup=users_keyboard(db_path, page),
         )
         return
@@ -307,10 +325,10 @@ async def admin_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         user_id = int(data.split(":")[-1])
         media_records = get_user_media(db_path, user_id=user_id, limit=10)
         if not media_records:
-            await query.message.reply_text(f"User {user_id} has no media records.")
+            await query.message.reply_text(f"ℹ️ User {user_id} has no media records.")
         else:
             await query.message.reply_text(
-                f"Last {len(media_records)} media messages from user {user_id}:"
+                f"🗂️ Last {len(media_records)} media messages from user {user_id}:"
             )
             for message_id, media_type, created_at in media_records:
                 try:
@@ -327,9 +345,9 @@ async def admin_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         exc,
                     )
                     await query.message.reply_text(
-                        f"Could not load one {media_type} item sent at {created_at}."
+                        f"⚠️ Could not load one {media_type} item sent at {created_at}."
                     )
-        await query.message.reply_text("Admin Panel", reply_markup=admin_menu_keyboard())
+        await query.message.reply_text("🛠️ Admin Panel", reply_markup=admin_menu_keyboard())
         return
 
 
@@ -361,7 +379,7 @@ async def handle_broadcast_input(update: Update, context: ContextTypes.DEFAULT_T
             failed += 1
 
     await update.message.reply_text(
-        f"Broadcast finished.\nDelivered: {success}\nFailed: {failed}",
+        f"✅ Broadcast finished.\nDelivered: {success}\nFailed: {failed}",
         reply_markup=admin_menu_keyboard(),
     )
     raise ApplicationHandlerStop
